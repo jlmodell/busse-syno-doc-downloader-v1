@@ -1,0 +1,110 @@
+{% extends "base.html" %} {% block content %}
+<div>
+  <button class="px-4 py-2 bg-blue-500 text-white rounded-lg">
+    <a href="/">Reset</a>
+  </button>
+</div>
+<div id="container">
+  <div class="mb-8">
+    <h1 class="text-2xl font-semibold mt-4 mb-8">Locate DMR/DHR Documents</h1>
+    <form class="flex space-x-4 justify-start items-center">
+      <label class="font-semibold" for="part">Part Number:</label>
+      <input
+        class="text-center px-4 py-2 border-b-2 border-b-black focus:bg-blue-500 focus:border-none focus:outline-none focus:border-b-2 focus:text-white focus:border-b-blue-900 rounded-lg"
+        type="text"
+        id="part"
+        name="part"
+      />
+      <button
+        class="px-4 py-2 bg-blue-500 text-white rounded-lg"
+        hx-trigger="click"
+        hx-target="#container"
+        hx-swap="outerHTML"
+        hx-include="#part"
+        hx-get="/dmr"
+      >
+        Search
+      </button>
+    </form>
+  </div>
+  <hr />
+  <div class="mt-8">
+    <h1 class="text-2xl font-semibold mt-4 mb-8">
+      Locate Catalogues By Document
+    </h1>
+    <form class="flex space-x-4 justify-start items-center">
+      <div class="flex flex-col space-y-4">
+        <div>
+          <input
+            type="radio"
+            id="mssmsd_id"
+            name="doc_type"
+            value="mssmsd_id"
+            class="form-radio h-4 w-4 text-blue-600 transition duration-150 ease-in-out"
+          />
+          <label for="mssmsd_id" class="ml-2 text-sm font-medium text-gray-700"
+            >mss/msd</label
+          >
+        </div>
+
+        <div>
+          <input
+            type="radio"
+            id="mi_id"
+            name="doc_type"
+            value="mi_id"
+            class="form-radio h-4 w-4 text-blue-600 transition duration-150 ease-in-out"
+          />
+          <label for="mi_id" class="ml-2 text-sm font-medium text-gray-700"
+            >mi</label
+          >
+        </div>
+
+        <div>
+          <input
+            type="radio"
+            id="qas_id"
+            name="doc_type"
+            value="qas"
+            class="form-radio h-4 w-4 text-blue-600 transition duration-150 ease-in-out"
+          />
+          <label for="qas_id" class="ml-2 text-sm font-medium text-gray-700"
+            >qas</label
+          >
+        </div>
+
+        <div>
+          <input
+            type="radio"
+            id="pss_id"
+            name="doc_type"
+            value="pss_id"
+            class="form-radio h-4 w-4 text-blue-600 transition duration-150 ease-in-out"
+          />
+          <label for="pss_id" class="ml-2 text-sm font-medium text-gray-700"
+            >pss</label
+          >
+        </div>
+      </div>
+
+      <label class="font-semibold" for="document">Document:</label>
+      <input
+        class="text-center px-4 py-2 border-b-2 border-b-black focus:bg-blue-500 focus:border-none focus:outline-none focus:border-b-2 focus:text-white focus:border-b-blue-900 rounded-lg"
+        type="text"
+        id="document"
+        name="document"
+      />
+      <button
+        class="px-4 py-2 bg-blue-500 text-white rounded-lg"
+        hx-trigger="click"
+        hx-target="#container"
+        hx-swap="outerHTML"
+        hx-include="#document, [name='doc_type']"
+        hx-get="/show_where_used"
+      >
+        Search
+      </button>
+    </form>
+  </div>
+</div>
+{%endblock%}

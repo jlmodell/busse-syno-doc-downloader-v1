@@ -1,28 +1,17 @@
 # import sys
 import os
 import re
-import sys
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from pymongo import MongoClient
 from synology_api import filestation
-
-options = {
-    "swu": "Show where used",
-    "find": "Find part details",
-}
-
-opts_list = list(options.keys())
-
-for i, opt in enumerate(opts_list):
-    print(f"{i+1}. {opt}")
-
-choice = int(input("Enter choice: ")) - 1
-
-if choice < 0 or choice >= len(opts_list):
-    print("Invalid choice")
-    sys.exit(1)
 
 
 def randomized_password(length: int = 16):
@@ -32,17 +21,7 @@ def randomized_password(length: int = 16):
     return "".join(random.choices(string.ascii_letters + string.digits, k=length))
 
 
-PASSWORD = randomized_password()
-
 load_dotenv()
-
-URI = os.getenv("MONGODB")
-
-client = MongoClient(URI)
-db = client.busse_data
-
-PKG = db.pkg
-MFG = db.mfg
 
 SYNO_IP = os.getenv("SYNO_IP")
 SYNO_PORT = os.getenv("SYNO_PORT")
@@ -69,8 +48,157 @@ FILESTATION = filestation.FileStation(
     interactive_output=False,
 )
 
+URI = os.getenv("MONGODB")
 
-def show_where_used():
+client = MongoClient(URI)
+db = client.busse_data
+
+PKG = db.pkg
+MFG = db.mfg
+
+LINK_TRACKER = client.synology_data.link_tracker
+
+
+def update_link_tracker(link: str, password: str):
+    now = datetime.now()
+    expires_at = now + timedelta(minutes=30)
+    obj = {
+        "link": link,
+        "password": password,
+        "expires_at": expires_at,
+    }
+    LINK_TRACKER.update_one({"links": {"$exists": True}}, {"$push": {"links": obj}})
+
+
+def delete_shared_link(link: str):
+    global FILESTATION
+
+    link_id = link.split("/")[-1]
+
+    return FILESTATION.delete_shared_link(link_id)
+
+
+def loop_over_links():
+    global LINK_TRACKER
+
+    links = []
+
+    not_expired = []
+
+    docs = list(LINK_TRACKER.find({}))
+
+    if docs:
+        for doc in docs:
+            links.extend(doc["links"])
+
+        for link in links:
+            print(
+                "Checking link: ",
+                link["link"],
+                "expires at: ",
+                link["expires_at"],
+                "now: ",
+                datetime.now(),
+                "delete: ",
+                link["expires_at"] < datetime.now(),
+            )
+
+            if link["expires_at"] > datetime.now():
+                not_expired.append(link)
+            else:
+                print("Deleting link: ", link["link"])
+                delete_shared_link(link["link"])
+
+        LINK_TRACKER.update_one({}, {"$set": {"links": not_expired}})
+
+
+scheduler = AsyncIOScheduler()
+
+
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    global CUSTOMERS
+    # scheduler.add_job(loop_over_links, "interval", minutes=20)
+    yield
+    loop_over_links()
+
+
+app = FastAPI(
+    lifespan=lifespan,
+)
+
+templates = Jinja2Templates(directory="templates")
+
+origins = [
+    "http://docs.bhd-ny.com",
+    "https://docs.bhd-ny.com",
+    "http://localhost",
+    "http://localhost:8742",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount(
+    "/static", StaticFiles(directory=os.path.join(os.getcwd(), "static")), name="static"
+)
+
+
+PASSWORD = randomized_password()
+
+
+def show_where_used(doc_type: str, document: str):
+    doc_types = [
+        "mss_msd_id",
+        "mi_id",
+        "qas",
+        "pss_id",  # pkg]
+        "mssmsd_id",
+        "qas_id",
+        "mi_id",
+        "pss_id",
+    ]  # mfg
+
+    if doc_type not in doc_types:
+        raise HTTPException(status_code=404, detail="Invalid document type")
+
+    docs_to_search = []
+
+    docs_to_search.append(doc_type)
+
+    if doc_type == "mss_msd_id":
+        docs_to_search.append("mssmsd_id")
+    elif doc_type == "mssmsd_id":
+        docs_to_search.append("mss_msd_id")
+
+    if doc_type == "qas":
+        docs_to_search.append("qas_id")
+    elif doc_type == "qas_id":
+        docs_to_search.append("qas")
+
+    docs = []
+
+    for dtype in docs_to_search:
+        pkg_docs = PKG.find({dtype: {"$regex": document, "$options": "i"}})
+        if pkg_docs:
+            docs.extend(pkg_docs)
+
+        mfg_docs = MFG.find({dtype: {"$regex": document, "$options": "i"}})
+        if mfg_docs:
+            docs.extend(mfg_docs)
+
+    if docs:
+        return [doc["part"] for doc in docs]
+
+    return []
+
+
+def show_where_used_cli():
     options = {
         "mss": "mss_msd_id",
         "mi": "mi_id",
@@ -98,8 +226,9 @@ def show_where_used():
     docs = PKG.find({options[opts_list[choice]]: {"$regex": document, "$options": "i"}})
 
     if docs:
-        for doc in docs:
-            print(doc["part"])
+        return docs
+
+    return None
 
 
 def print_list_recursive(folder_path):
@@ -116,7 +245,9 @@ def print_list_recursive(folder_path):
 
 
 def dmr_create_sharing_link(
-    part: str, path: str = "Device Master Record (DMR) + Artwork"
+    part: str,
+    password: str,
+    path: str = "Device Master Record (DMR) + Artwork",
 ):
     global FILESTATION
 
@@ -133,16 +264,23 @@ def dmr_create_sharing_link(
             )["data"]["files"]:
                 if sub_file["name"] == part:
                     expires_at = datetime.now() + timedelta(minutes=5)
-                    print("expires at: ", expires_at)
-                    return FILESTATION.create_sharing_link(
+                    # print("expires at: ", expires_at)
+
+                    sharing_link = FILESTATION.create_sharing_link(
                         path=sub_file["path"],
-                        password=PASSWORD,
+                        password=password,
                         date_expired=expires_at,
                     )["data"]["links"][0]["url"].replace(":5001", "")
 
+                    update_link_tracker(sharing_link, password)
+
+                    return sharing_link
+
 
 def qas_create_sharing_link(
-    qas_id: str, path: str = "Quality Assurance Specification (QAS, QAS-R) PDF"
+    qas_id: str,
+    password: str,
+    path: str = "Quality Assurance Specification (QAS, QAS-R) PDF",
 ):
     global FILESTATION
 
@@ -160,14 +298,18 @@ def qas_create_sharing_link(
                 folder_path=file["path"],
             )["data"]["files"]:
                 if regex_pattern.search(sub_file["name"]):
-                    return FILESTATION.create_sharing_link(
+                    sharing_link = FILESTATION.create_sharing_link(
                         path=sub_file["path"],
-                        password=PASSWORD,
+                        password=password,
                         date_expired=datetime.now() + timedelta(minutes=30),
                     )["data"]["links"][0]["url"].replace(":5001", "")
 
+                    update_link_tracker(sharing_link, password)
 
-def flat_path_create_sharing_link(filename_partial: str, path: str):
+                    return sharing_link
+
+
+def flat_path_create_sharing_link(filename_partial: str, password: str, path: str):
     global FILESTATION
 
     root_path = r"/Document Control/Document Control @ Busse/PDF Controlled Documents"
@@ -177,18 +319,16 @@ def flat_path_create_sharing_link(filename_partial: str, path: str):
     )
 
     for file in files["data"]["files"]:
-        # print(
-        #     file["name"],
-        #     filename_partial,
-        #     re.search(rf"{filename_partial}", file["name"], re.IGNORECASE),
-        # )
-
         if re.search(rf"{filename_partial}", file["name"], re.IGNORECASE):
-            return FILESTATION.create_sharing_link(
+            sharing_link = FILESTATION.create_sharing_link(
                 path=file["path"],
-                password=PASSWORD,
+                password=password,
                 date_expired=datetime.now() + timedelta(minutes=30),
             )["data"]["links"][0]["url"].replace(":5001", "")
+
+            update_link_tracker(sharing_link, password)
+
+            return sharing_link
 
 
 def fm_get_details(part: str):
@@ -204,7 +344,7 @@ def fm_get_details(part: str):
 
 
 def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
-    global PASSWORD
+    generated_password = randomized_password()
 
     if pkg_or_mfg == "pkg":
         mss_id = doc.get("mss_msd_id", "").upper().strip()
@@ -212,21 +352,21 @@ def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
         mi_id = doc.get("mi_id", "").upper().strip()
         pss_id = doc.get("pss_id", "").upper().strip()
 
-        dmr_link = dmr_create_sharing_link(part)
+        dmr_link = dmr_create_sharing_link(part, generated_password)
 
         mi_link = flat_path_create_sharing_link(
-            mi_id, "PKG Manufacturing Instructions (MI) PDF"
+            mi_id, generated_password, "PKG Manufacturing Instructions (MI) PDF"
         )
         if not mi_link:
             mi_link = flat_path_create_sharing_link(
-                mi_id, "MFG Manufacturing Instructions (MI) PDF"
+                mi_id, generated_password, "MFG Manufacturing Instructions (MI) PDF"
             )
 
         dmr_details = {
             "mss": {
                 "name": "MSS " + mss_id,
                 "link": flat_path_create_sharing_link(
-                    mss_id, "Machine Setup Sheet (MSS) PDF"
+                    mss_id, generated_password, "Machine Setup Sheet (MSS) PDF"
                 ),
             },
             "mi": {
@@ -235,12 +375,12 @@ def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
             },
             "qas": {
                 "name": "QAS " + qas_id,
-                "link": qas_create_sharing_link(qas_id),
+                "link": qas_create_sharing_link(qas_id, generated_password),
             },
             "pss": {
                 "name": "PSS " + pss_id,
                 "link": flat_path_create_sharing_link(
-                    pss_id, "Post Sterilization Specification (PSS)"
+                    pss_id, generated_password, "Post Sterilization Specification (PSS)"
                 ),
             },
             "shipper_label": {
@@ -277,22 +417,23 @@ def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
         mi_id = doc.get("mi_id", "").upper().strip()
         pss_id = doc.get("pss_id", "").upper().strip()
 
-        dmr_link = dmr_create_sharing_link(part)
+        dmr_link = dmr_create_sharing_link(part, generated_password)
 
         mi_link = flat_path_create_sharing_link(
             mi_id,
+            generated_password,
             "MFG Manufacturing Instructions (MI) PDF",
         )
         if not mi_link:
             mi_link = flat_path_create_sharing_link(
-                mi_id, "PKG Manufacturing Instructions (MI) PDF"
+                mi_id, generated_password, "PKG Manufacturing Instructions (MI) PDF"
             )
 
         dmr_details = {
             "mss": {
                 "name": "MSS " + mss_id,
                 "link": flat_path_create_sharing_link(
-                    mss_id, "Machine Setup Sheet (MSS) PDF"
+                    mss_id, generated_password, "Machine Setup Sheet (MSS) PDF"
                 ),
             },
             "mi": {
@@ -301,12 +442,12 @@ def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
             },
             "qas": {
                 "name": "QAS " + qas_id,
-                "link": qas_create_sharing_link(qas_id),
+                "link": qas_create_sharing_link(qas_id, generated_password),
             },
             "pss": {
                 "name": "PSS " + pss_id,
                 "link": flat_path_create_sharing_link(
-                    pss_id, "Post Sterilization Specification (PSS)"
+                    pss_id, generated_password, "Post Sterilization Specification (PSS)"
                 ),
             },
             "shipper_label": {
@@ -340,55 +481,58 @@ def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
             },
         }
 
-    return dmr_details
+    return dmr_details, generated_password
+
+
+@app.get("/")
+def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/show_where_used")
+def show_where_used_endpoint(request: Request, doc_type: str, document: str):
+    doc_type = doc_type.strip().lower()
+    document = document.strip().upper()
+
+    parts = show_where_used(doc_type=doc_type, document=document)
+
+    if not parts:
+        return HTTPException(status_code=404, detail="Document not found")
+
+    return templates.TemplateResponse(
+        "swu.html",
+        {
+            "request": request,
+            "parts": parts,
+            "doc_type": doc_type.upper(),
+            "document": document.upper(),
+        },
+    )
+
+
+@app.get("/dmr")
+def get_dmr_details_endpoint(request: Request, part: str):
+    part = part.strip().upper()
+
+    doc, doc_type = fm_get_details(part)
+
+    if not doc:
+        return HTTPException(status_code=404, detail="Part not found")
+
+    details, password = fm_get_dmr_details(doc, doc_type, part)
+
+    # return {"details": details, "password": password}
+    return templates.TemplateResponse(
+        "dmr_details.html",
+        {"request": request, "part": part, "dmr": details, "password": password},
+    )
 
 
 if __name__ == "__main__":
-    from time import sleep
+    import uvicorn
 
-    if choice == 0:
-        show_where_used()
+    loop_over_links()
 
-    else:
-        part = input("Enter part number: ").strip().upper()
+    scheduler.add_job(loop_over_links, "interval", minutes=20)
 
-        doc, doc_type = fm_get_details(part)
-
-        if doc:
-            details = fm_get_dmr_details(doc, doc_type, part)
-
-            print()
-            print("Details: ")
-            print()
-            print("Part: ", part)
-            print()
-
-            for k, v in details.items():
-                output = [k]
-
-                for k1, v1 in v.items():
-                    output.append(v1)
-
-                print(f"{output[0].upper()}: {output[1]} -> {output[2]}")
-
-            print("\n\n")
-
-            print(f"The password is: {PASSWORD}")
-
-            import pyperclip
-
-            print(
-                "The password is automatically generated and will expire in 30 minutes."
-            )
-            print("Please do not share the password with anyone.")
-            print("The password was saved to your clipboard.")
-
-            pyperclip.copy(PASSWORD)
-        else:
-            print("Part not found")
-
-    print()
-    print("Ctrl + C to exit")
-
-    sleep(100 * 60 * 60)
-    sys.exit(0)
+    uvicorn.run("main:app", host="0.0.0.0", port=8742, reload=True)

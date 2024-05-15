@@ -1,0 +1,93 @@
+{% extends "base.html" %} {% block content %}
+<div class="flex justify-start items-start">
+  <div class="grid grid-cols-4 w-1/2">
+    <div class="underline col-span-4">
+      <h1 class="text-2xl font-semibold mt-4 mb-8">
+        DMR/DHR Details [{{part}}]
+      </h1>
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">MSS</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.mss.link}}" target="_blank">{{dmr.mss.name}}</a>
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">MI</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.mi.link}}" target="_blank">{{dmr.mi.name}}</a>
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">QAS</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.qas.link}}" target="_blank">{{dmr.qas.name}}</a>
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">PSS</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.pss.link}}" target="_blank">{{dmr.pss.name}}</a>
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">Shipper Label</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.shipper_label.link}}" target="_blank"
+        >{{dmr.shipper_label.name}}</a
+      >
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">Content Label</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.content_label.link}}" target="_blank"
+        >{{dmr.content_label.name}}</a
+      >
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">Dispenser Label</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.dispenser_label.link}}" target="_blank"
+        >{{dmr.dispenser_label.name}}</a
+      >
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">Print Mat</h2>
+    <div class="col-span-3">
+      <a href="{{dmr.print_mat.link}}" target="_blank"
+        >{{dmr.print_mat.name}}</a
+      >
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">DMR</h2>
+    <div class="col-span-3">
+      {% if dmr.dmr.link %}
+      <a href="{{dmr.dmr.link}}" target="_blank">{{dmr.dmr.name}}</a>
+      {% else %} {{dmr.dmr.name}} {% endif %}
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">DCO</h2>
+    <div class="col-span-3">
+      {% if dmr.dco.link %}
+      <a href="{{dmr.dco.link}}" target="_blank">{{dmr.dco.name}}</a>
+      {% else %} {{dmr.dco.name}} {% endif %}
+    </div>
+
+    <h2 class="text-xl font-semibold col-span-1">Ink Part #</h2>
+    <div class="col-span-3">
+      {% if dmr.ink.link %}
+      <a href="{{dmr.ink.link}}" target="_blank">{{dmr.ink.name}}</a>
+      {% else %} {{dmr.ink.name}} {% endif %}
+    </div>
+
+    <div class="col-span-4 mt-8 mb-2">
+      <h2 class="text-xl font-semibold">
+        The password is
+        <button
+          class="border-b-2 border-b-black"
+          onclick="copyToClipboard('{{password}}')"
+        >
+          {{password}}
+        </button>
+        <!-- <span class="border-b-2 border-b-black">{{password}}</span> -->
+      </h2>
+    </div>
+  </div>
+</div>
+{% endblock %}
