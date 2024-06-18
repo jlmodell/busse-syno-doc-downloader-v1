@@ -4,7 +4,10 @@
   <div class="grid w-1/2">
     <div class="underline">
       <h1 class="text-2xl font-semibold mt-4 mb-8">
-        Show Parts That Use... [{{doc_type}}, {{document}}]
+        {% if doc_type == "QAS" %} {% if qas_type == "QAS" %} Show Parts That
+        Use... [{{doc_type}}, {{document}}] {% else %} Show Parts That Use...
+        [QAS-R, {{document}}] {% endif %} {% else %} Show Parts That Use...
+        [{{doc_type}}, {{document}}] {% endif %}
       </h1>
     </div>
     {% for part in parts %}

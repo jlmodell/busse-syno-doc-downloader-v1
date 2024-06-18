@@ -55,6 +55,7 @@ db = client.busse_data
 
 PKG = db.pkg
 MFG = db.mfg
+COMP = db.components
 
 LINK_TRACKER = client.synology_data.link_tracker
 
@@ -182,6 +183,7 @@ def show_where_used(doc_type: str, document: str):
         docs_to_search.append("qas")
 
     docs = []
+    is_component = False
 
     for dtype in docs_to_search:
         pkg_docs = PKG.find({dtype: {"$regex": document, "$options": "i"}})
@@ -192,10 +194,15 @@ def show_where_used(doc_type: str, document: str):
         if mfg_docs:
             docs.extend(mfg_docs)
 
-    if docs:
-        return [doc["part"] for doc in docs]
+        comp_docs = COMP.find({dtype: {"$regex": document, "$options": "i"}})
+        if comp_docs:
+            docs.extend(comp_docs)
+            is_component = True
 
-    return []
+    if docs:
+        return [doc["part"] for doc in docs], "QAS-R" if is_component else "QAS"
+
+    return [], None
 
 
 def show_where_used_cli():
@@ -337,8 +344,13 @@ def fm_get_details(part: str):
     if not doc:
         doc = MFG.find_one({"part": part})
         doc_type = "mfg"
+
         if not doc:
-            return None, None
+            doc = COMP.find_one({"part": part})
+            doc_type = "component"
+
+            if not doc:
+                return None, None
 
     return doc, doc_type
 
@@ -346,7 +358,7 @@ def fm_get_details(part: str):
 def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
     generated_password = randomized_password()
 
-    if pkg_or_mfg == "pkg":
+    if pkg_or_mfg == "pkg" or pkg_or_mfg == "component":
         mss_id = doc.get("mss_msd_id", "").upper().strip()
         qas_id = doc.get("qas", "").upper().strip()
         mi_id = doc.get("mi_id", "").upper().strip()
@@ -374,7 +386,7 @@ def fm_get_dmr_details(doc: dict[str, str], pkg_or_mfg: str, part: str):
                 "link": mi_link,
             },
             "qas": {
-                "name": "QAS " + qas_id,
+                "name": f"{'QAS' if pkg_or_mfg == 'pkg' else 'QAS-R'} {qas_id}",
                 "link": qas_create_sharing_link(qas_id, generated_password),
             },
             "pss": {
@@ -494,7 +506,7 @@ def show_where_used_endpoint(request: Request, doc_type: str, document: str):
     doc_type = doc_type.strip().lower()
     document = document.strip().upper()
 
-    parts = show_where_used(doc_type=doc_type, document=document)
+    parts, qas_type = show_where_used(doc_type=doc_type, document=document)
 
     if not parts:
         return HTTPException(status_code=404, detail="Document not found")
@@ -505,6 +517,7 @@ def show_where_used_endpoint(request: Request, doc_type: str, document: str):
             "request": request,
             "parts": parts,
             "doc_type": doc_type.upper(),
+            "qas_type": qas_type.upper() if qas_type else None,
             "document": document.upper(),
         },
     )
