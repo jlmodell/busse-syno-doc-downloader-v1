@@ -154,6 +154,8 @@ PASSWORD = randomized_password()
 
 
 def show_where_used(doc_type: str, document: str):
+    document = document.replace(" ", "").strip().upper()
+
     doc_types = [
         "mss_msd_id",
         "mi_id",
